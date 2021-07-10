@@ -8,15 +8,16 @@
 #' @export
 #' @examples
 #' \dontrun{
-#' data <- read_tsv("evidence,txt) %>% select(matches("Reporter intensity \\d+"))
-#' impurities <- read_tsv("VJ309267.csv")
+#' data <- read_tsv("evidence,txt") %>% select(matches("Reporter intensity \\d+"))
+#' impurities <- read_csv("VJ309267.csv")
 #' correctedIntensities <- correctTMTproImpurities(data, impurities)
 #' }
 #'
+#' @import magrittr
 #' @import dplyr
-#' @import readr
-#' @import magrittr,
-#' @import matlib,
+#' @import matlib
+#' @import stringr
+#'
 #'
 correctTMTproImpurities <- function(data, impurities)
 {
@@ -24,7 +25,7 @@ correctTMTproImpurities <- function(data, impurities)
 
   impurities <- impurities %>%
     replace(is.na(.), 0) %>%
-    select(-label) %>%
+    select(-.data$label) %>%
     as.matrix()
 
   # normalize by row sum

@@ -7,15 +7,17 @@ Authors@R:
            role = c("aut", "cre"),
            email = "d.goldfarb@wustl.edu",
            comment = c(ORCID = "0000-0002-1584-5423"))
-Description: Corrects TMT reporter intensities for TMT impurities
+Description: Corrects TMT reporter intensities for TMT impurities.
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.1.1
-Imports: 
+Imports:
     magrittr,
     matlib,
-    readr
-Depends: 
+    readr,
+    dplyr,
+    stringr
+Depends:
     R (>= 2.10)
