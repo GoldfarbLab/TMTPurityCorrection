@@ -39,6 +39,7 @@ correctTMTproImpurities <- function(data, impurities)
 
   # set negatives to 0
   corrected.intensities[data <= 0] <- 0
+  corrected.intensities[corrected.intensities < 0] <- 0
 
   # set colnames
   colnames(corrected.intensities) <- str_c("Reporter.intensity.corrected.", 1:nlabels)
