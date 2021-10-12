@@ -111,7 +111,7 @@ applyNoiseBandCap <- function(data, noise)
 #' @param msms data frame of uncorrected TMT intensities, raw file, and MS2 scan number
 #' @param impurities data frame of impurities for a specific lot
 #' @param noise optional data frame of TMT noiseband values, raw file, and MS2 scan number
-#' @param method purity correction method. Options = "NNLS" and "LS"
+#' @param method purity correction method. Options = "NNLS" and "OLS"
 #' @param noise.replacement.method should the noiseband replace missing values before or after correction. Options = "pre" and "post"
 #' @param remain.missing should missing values be set to 0 (missing) after correction or not. True or False
 #' @param remove.missing.rows should rows containing all missing rows be removed or not. True or False
@@ -145,7 +145,7 @@ correctImpurities.RTS <- function(msms, impurities, noise,
 #' @param msms data frame of uncorrected TMT intensities, raw file, and MS2 scan number
 #' @param impurities data frame of impurities for a specific lot
 #' @param noise optional data frame of TMT noiseband values, raw file, and MS2 scan number
-#' @param method purity correction method. Options = "NNLS" and "LS"
+#' @param method purity correction method. Options = "NNLS" and "OLS"
 #' @param noise.replacement.method should the noiseband replace missing values before or after correction. Options = "pre" and "post"
 #' @param remain.missing should missing values be set to 0 (missing) after correction or not. True or False
 #' @param remove.missing.rows should rows containing all missing rows be removed or not. True or False
@@ -184,7 +184,7 @@ correctImpurities.MaxQuant <- function(impurities, txt.path,
 #' @param impurities data frame of impurities for a specific lot
 #' @param intensities data frame of TMT intensity values, raw file, and MS2 scan number
 #' @param noise optional data frame of TMT noiseband values, raw file, and MS2 scan number
-#' @param method purity correction method. Options = "NNLS" and "LS"
+#' @param method purity correction method. Options = "NNLS" and "OLS"
 #' @param noise.replacement.method should the noiseband replace missing values before or after correction. Options = "pre" and "post"
 #' @param remain.missing should missing values be set to 0 (missing) after correction or not. True or False
 #' @param remove.missing.rows should rows containing all missing rows be removed or not. True or False
@@ -263,7 +263,7 @@ correctImpurities.msms <- function(msms, impurities, intensities, noise,
 #' @param impurities data frame of impurities for a specific lot
 #' @param intensities data frame of TMT intensity values, raw file, and MS2 scan number
 #' @param noise optional data frame of TMT noiseband values, raw file, and MS2 scan number
-#' @param method purity correction method. Options = "NNLS" and "LS"
+#' @param method purity correction method. Options = "NNLS" and "OLS"
 #' @param noise.replacement.method should the noiseband replace missing values before or after correction. Options = "pre" and "post"
 #' @param remain.missing should missing values be set to 0 (missing) after correction or not. True or False
 #' @param remove.missing.rows should rows containing all missing rows be removed or not. True or False
@@ -320,6 +320,12 @@ correctImpurities.evidence <- function(evidence, impurities, msms, intensities, 
       inner_join(summarized.msms, by=c("id" = "Evidence ID"))
   }
 
+  # exclude scans with no reporter ions since we don't want to impute them all
+  if (remove.missing.rows)
+  {
+    corrected.evidence <- corrected.evidence %>% filter(rowSums(across(matches("Reporter intensity \\d+"))) > 0)
+  }
+
   return(corrected.evidence)
 }
 
@@ -331,13 +337,14 @@ correctImpurities.evidence <- function(evidence, impurities, msms, intensities, 
 
 #' Performs purity correction on MaxQuant proteinGroups.txt data
 #'
+#' @param summary data frame of summary.txt
 #' @param proteinGroups data frame of evidence.txt
 #' @param msms optional data frame of msms.txt to perform correction at spectrum level. Required for noiseband imputation.
 #' @param impurities data frame of impurities for a specific lot
 #' @param intensities data frame of TMT intensity values, raw file, and MS2 scan number
 #' @param noise optional data frame of TMT noiseband values, raw file, and MS2 scan number
 #' @param use.razor should razor peptides be used for protein quantification. Only used if msms is supplied.
-#' @param method purity correction method. Options = "NNLS" and "LS"
+#' @param method purity correction method. Options = "NNLS" and "OLS"
 #' @param noise.replacement.method should the noiseband replace missing values before or after correction. Options = "pre" and "post"
 #' @param remain.missing should missing values be set to 0 (missing) after correction or not. True or False
 #' @param remove.missing.rows should rows containing all missing rows be removed or not. True or False
@@ -349,7 +356,7 @@ correctImpurities.evidence <- function(evidence, impurities, msms, intensities, 
 #' }
 #'
 #'
-correctImpurities.proteinGroups <- function(proteinGroups, impurities, msms, intensities, noise,
+correctImpurities.proteinGroups <- function(summary, proteinGroups, impurities, msms, intensities, noise,
                                             use.razor=T,
                                             method=c("NNLS","OLS"),
                                             noise.replacement.method=c("pre","post"),
@@ -359,19 +366,45 @@ correctImpurities.proteinGroups <- function(proteinGroups, impurities, msms, int
   method <- match.arg(method)
   noise.replacement.method <- match.arg(noise.replacement.method)
 
+  # get raw file to experiment mapping
+  summary <- summary %>%
+    filter(`Raw file` != "Total") %>%
+    select(`Raw file`, Experiment)
+  experiments <- unique(summary$Experiment)
+
+  corrected.proteinGroups <- proteinGroups %>%
+    select(-matches("Reporter intensity corrected \\d+"))
+
   # correct proteinGroups without noise
   if (missing(msms))
   {
-    intensities <- proteinGroups %>% select(matches("Reporter intensity \\d+"))
-    corrected.intensities <- correctImpurities(intensities, impurities,
-                                               method=method,
-                                               noise.replacement.method=noise.replacement.method,
-                                               remain.missing=remain.missing)
+    for (exp in experiments)
+    {
+      if (exp == "")
+      {
+        intensities <- proteinGroups %>% select(matches("Reporter intensity \\d+$"))
+      }
+      else
+      {
+        intensities <- proteinGroups %>% select(matches(str_c("Reporter intensity \\d+ ", exp)))
+      }
 
-    corrected.proteinGroups <- proteinGroups %>%
-      select(-matches("Reporter intensity corrected \\d+")) %>%
-      cbind(corrected.intensities)
+      corrected.intensities <- correctImpurities(intensities, impurities,
+                                                 method=method,
+                                                 noise.replacement.method=noise.replacement.method,
+                                                 remain.missing=remain.missing)
+
+      if (exp != "")
+      {
+        corrected.intensities <- corrected.intensities %>% as.data.frame() %>%
+          rename_with(.cols = matches("Reporter intensity corrected \\d+"), .fn = ~ str_c(.x, exp, sep=" "))
+      }
+
+      corrected.proteinGroups <- corrected.proteinGroups %>% cbind(corrected.intensities)
+
+    }
   }
+
 
   # correct proteinGroups using msms and possibly noise
   else
@@ -396,18 +429,47 @@ correctImpurities.proteinGroups <- function(proteinGroups, impurities, msms, int
       corrected.msms <- corrected.msms %>% filter(!str_detect(`Protein group IDs`, ";"))
     }
 
-    # summarize to proteinGroup level and drop MSMS with multiple groups
-    summarized.msms <- corrected.msms %>%
-      separate_rows(`Protein group IDs`, sep=";") %>%
-      mutate(`Protein group IDs` = as.numeric(`Protein group IDs`)) %>%
-      inner_join(razor.peptide.ids, by=c("Peptide ID" = "Peptide IDs", "Protein group IDs" = "id")) %>%
-      group_by(`Protein group IDs`) %>%
-      summarise(across(matches("Reporter intensity corrected \\d+"), ~sum(., na.rm=T)))
+    for (exp in experiments)
+    {
+      # filter corrected msms for raw files with this experiment
+      if (exp == "")
+      {
+        corrected.msms.exp <- corrected.msms
+      }
+      else
+      {
+        corrected.msms.exp <- corrected.msms %>%
+          inner_join(summary) %>%
+          filter(Experiment == exp)
+      }
 
-    # overwrite corrected intensity values.
-    corrected.proteinGroups <- proteinGroups %>%
-      select(-matches("Reporter intensity corrected \\d+")) %>%
-      inner_join(summarized.msms, by=c("id" = "Protein group IDs"))
+
+
+      # summarize to proteinGroup level
+      summarized.msms.exp <- corrected.msms.exp %>%
+        separate_rows(`Protein group IDs`, sep=";") %>%
+        mutate(`Protein group IDs` = as.numeric(`Protein group IDs`)) %>%
+        inner_join(razor.peptide.ids, by=c("Peptide ID" = "Peptide IDs", "Protein group IDs" = "id")) %>%
+        group_by(`Protein group IDs`) %>%
+        summarise(across(matches("Reporter intensity corrected \\d+"), ~sum(., na.rm=T)))
+
+      # update columns if multiple experiments
+      if (exp != "" & length(experiments) > 1)
+      {
+        summarized.msms.exp <- summarized.msms.exp %>%
+          rename_with(.cols = matches("Reporter intensity corrected \\d+"), .fn = ~ str_c(.x, exp, sep=" "))
+      }
+
+      # overwrite corrected intensity values.
+      corrected.proteinGroups <- corrected.proteinGroups %>%
+        left_join(summarized.msms.exp, by=c("id" = "Protein group IDs"))
+    }
+  }
+
+  # exclude scans with no reporter ions since we don't want to impute them all
+  if (remove.missing.rows)
+  {
+    corrected.proteinGroups <- corrected.proteinGroups %>% filter(rowSums(across(matches("Reporter intensity \\d+"))) > 0)
   }
 
   return(corrected.proteinGroups)
@@ -432,7 +494,7 @@ correctImpurities.proteinGroups <- function(proteinGroups, impurities, msms, int
 #' @param data data frame of uncorrected TMT intensities.
 #' @param impurities data frame of impurities for a specific lot
 #' @param noise optional data frame of TMT noiseband values. Must line up row by row with data
-#' @param method purity correction method. Options = "NNLS" and "LS"
+#' @param method purity correction method. Options = "NNLS" and "OLS"
 #' @param noise.replacement.method should the noiseband replace missing values before or after correction. Options = "pre" and "post"
 #' @param remain.missing should missing values be set to 0 (missing) after correction or not. True or False
 #'
