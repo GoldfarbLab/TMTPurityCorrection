@@ -4,6 +4,7 @@ export(correctImpurities.msms)
 export(correctImpurities.evidence)
 export(correctImpurities.proteinGroups)
 export(correctImpurities)
+export(correctImpurities.MaxQuant)
 
 import(dplyr)
 import(magrittr)
