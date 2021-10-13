@@ -151,6 +151,7 @@ correctImpurities.RTS <- function(msms, impurities, noise,
 #' @param remain.missing should missing values be set to 0 (missing) after correction or not. Only used if not doing noiseband imputation. True or False
 #' @param remove.missing.rows should rows containing all missing rows be removed or not. True or False
 #' @param use.razor should razor peptides be used for protein quantification. Only used for proteinGroups and if msms is supplied.
+#' @param guess_max guess_max used for reading the csv files. It's the number of rows to read to guess column data types.
 #'
 #' @export
 #' @examples
@@ -166,7 +167,8 @@ correctImpurities.MaxQuant <- function(impurities, txt.path,
                                        method=c("NNLS","LS"),
                                        noise.replacement.method=c("pre","post","none"),
                                        remain.missing=T,
-                                       remove.missing.rows=T)
+                                       remove.missing.rows=T,
+                                       guess_max=20000)
 {
   # match up arguments to valid options
   levels <- match.arg(levels, several.ok = T)
@@ -179,15 +181,15 @@ correctImpurities.MaxQuant <- function(impurities, txt.path,
   # read in necessary files
   if ("msms" %in% levels || noise.replacement.method != "none")
   {
-    msms <- read_tsv(str_c(txt.path, "/msms.txt"))
+    msms <- read_tsv(str_c(txt.path, "/msms.txt"), guess_max=guess_max)
   }
   if ("evidence" %in% levels)
   {
-    evidence <- read_tsv(str_c(txt.path, "/evidence.txt"))
+    evidence <- read_tsv(str_c(txt.path, "/evidence.txt"), guess_max=guess_max)
   }
   if ("proteinGroups" %in% levels)
   {
-    proteinGroups <- read_tsv(str_c(txt.path, "/proteinGroups.txt"))
+    proteinGroups <- read_tsv(str_c(txt.path, "/proteinGroups.txt"), guess_max=guess_max)
     summary <- read_tsv(str_c(txt.path, "/summary.txt"))
   }
   if (noise.replacement.method != "none")
