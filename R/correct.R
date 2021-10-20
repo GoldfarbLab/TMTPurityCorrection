@@ -168,6 +168,7 @@ correctImpurities.MaxQuant <- function(impurities, txt.path,
                                        noise.replacement.method=c("pre","post","none"),
                                        remain.missing=T,
                                        remove.missing.rows=T,
+                                       use.razor=T,
                                        guess_max=20000)
 {
   # match up arguments to valid options
@@ -230,6 +231,7 @@ correctImpurities.MaxQuant <- function(impurities, txt.path,
                                                             intensities=intensity,
                                                             noise=noise,
                                                             method=method,
+                                                            use.razor=use.razor,
                                                             noise.replacement.method=noise.replacement.method,
                                                             remain.missing=remain.missing,
                                                             remove.missing.rows=remove.missing.rows)
@@ -384,7 +386,9 @@ correctImpurities.evidence <- function(evidence, impurities, msms, intensities, 
     # summarize to evidence level
     summarized.msms <- corrected.msms %>%
       group_by(`Evidence ID`) %>%
-      summarise(across(matches("Reporter intensity corrected \\d+"), ~sum(., na.rm=T)))
+      summarise(across(matches("Reporter intensity corrected \\d+"), ~sum(., na.rm=T)),
+                across(matches("Is missing \\d+"), ~all(as.logical(.), na.rm=T)),
+                across(matches("SN \\d+"), ~sum(., na.rm=T)))
 
     # overwrite corrected intensity values
     corrected.evidence <- evidence %>%
@@ -523,13 +527,17 @@ correctImpurities.proteinGroups <- function(summary, proteinGroups, impurities, 
         mutate(`Protein group IDs` = as.numeric(`Protein group IDs`)) %>%
         inner_join(razor.peptide.ids, by=c("Peptide ID" = "Peptide IDs", "Protein group IDs" = "id")) %>%
         group_by(`Protein group IDs`) %>%
-        summarise(across(matches("Reporter intensity corrected \\d+"), ~sum(., na.rm=T)))
+        summarise(across(matches("Reporter intensity corrected \\d+"), ~sum(., na.rm=T)),
+                  across(matches("Is missing \\d+"), ~all(as.logical(.), na.rm=T)),
+                  across(matches("SN \\d+"), ~sum(., na.rm=T)))
 
       # update columns if multiple experiments
       if (exp != "" & length(experiments) > 1)
       {
         summarized.msms.exp <- summarized.msms.exp %>%
-          rename_with(.cols = matches("Reporter intensity corrected \\d+"), .fn = ~ str_c(.x, exp, sep=" "))
+          rename_with(.cols = matches("Reporter intensity corrected \\d+"), .fn = ~ str_c(.x, exp, sep=" ")) %>%
+          rename_with(.cols = matches("Is missing \\d+"), .fn = ~ str_c(.x, exp, sep=" ")) %>%
+          rename_with(.cols = matches("SN \\d+"), .fn = ~ str_c(.x, exp, sep=" "))
       }
 
       # overwrite corrected intensity values.
@@ -601,6 +609,10 @@ correctImpurities <- function(data, impurities, noise,
 
   data <- as.matrix(data)
 
+  # Generate matrix of isMissing
+  isMissing <- data == 0
+  colnames(isMissing) <- str_replace(colnames(isMissing), "Reporter intensity", "Is missing")
+
   # Do not perform noise band correction
   if (missing(noise) || is.na(noise))
   {
@@ -616,6 +628,10 @@ correctImpurities <- function(data, impurities, noise,
   else if (!missing(noise) && !is.na(noise))
   {
     noise <- as.matrix(noise)
+    # Generate matrix of S/N
+    sn <- data / noise
+    colnames(sn) <- str_replace(colnames(sn), "Reporter intensity", "SN")
+
     # Add noise before purity correction
     if (noise.replacement.method=="pre")
     {
@@ -632,7 +648,11 @@ correctImpurities <- function(data, impurities, noise,
       missing.or.low <- is.na(data) | data==0 | corrected.data < noise
       corrected.data[missing.or.low] <- noise[missing.or.low]
     }
+
+    corrected.data <- corrected.data %>% cbind(sn)
   }
+
+  corrected.data <- corrected.data %>% cbind(isMissing)
 
   return(corrected.data)
 
