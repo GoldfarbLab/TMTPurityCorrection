@@ -119,7 +119,6 @@ applyNoiseBandCap <- function(data, noise)
 #' @export
 #' @examples
 #' \dontrun{
-#'
 #' }
 #'
 #'
