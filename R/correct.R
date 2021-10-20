@@ -178,6 +178,13 @@ correctImpurities.MaxQuant <- function(impurities, txt.path,
   intensity <- NA
   noise <- NA
 
+  # we can only correct the msms file if the noise.txt and intensity.txt files
+  # are present because MaxQuant's TMT quant is missing/incorrect in the msms file
+  if ("msms" %in% levels && noise.replacement.method == "none")
+  {
+    stop("Can't perform correction on msms without noise replacement. Either use noise replacement, or remove msms from the levels to correct")
+  }
+
   # read in necessary files
   if ("msms" %in% levels || noise.replacement.method != "none")
   {
