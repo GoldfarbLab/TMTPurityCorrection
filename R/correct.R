@@ -164,7 +164,7 @@ correctImpurities.RTS <- function(msms, impurities, noise,
 #'
 correctImpurities.MaxQuant <- function(impurities, txt.path,
                                        levels=c("msms", "evidence", "proteinGroups"),
-                                       method=c("NNLS","LS"),
+                                       method=c("NNLS","OLS"),
                                        noise.replacement.method=c("pre","post","none"),
                                        remain.missing=T,
                                        remove.missing.rows=T,
