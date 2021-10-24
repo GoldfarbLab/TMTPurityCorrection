@@ -15,7 +15,8 @@ correctImpurities.MaxQuant(
   remain.missing = T,
   remove.missing.rows = T,
   use.razor = T,
-  guess_max = 20000
+  use.maxquant.msms.intensity = F,
+  guess_max = 10000
 )
 }
 \arguments{
@@ -23,7 +24,7 @@ correctImpurities.MaxQuant(
 
 \item{txt.path}{path to the MaxQuant txt output folder. If using noiseband imputation, it should contain an intensity.txt and noise.txt file.}
 
-\item{levels}{list of which levels to perform purity correction and noiseband imputation. Options are "msms", "evidence", and "proteinGroups"}
+\item{levels}{list of which maxquant files to perform purity correction and noiseband imputation. Options are "msms", "evidence", "proteinGroups", or any "Sites" file. e.g "Phospho (STY)Sites"}
 
 \item{method}{purity correction method. Options = "NNLS" and "OLS"}
 
@@ -34,6 +35,8 @@ correctImpurities.MaxQuant(
 \item{remove.missing.rows}{should rows containing all missing rows be removed or not. True or False}
 
 \item{use.razor}{should razor peptides be used for protein quantification. Only used for proteinGroups and if msms is supplied.}
+
+\item{use.maxquant.msms.intensity}{should the intensity in the MSMS.txt file be used (or intensity.txt extracted from the raw file). Only use if MS2 data. Necessary if MS2s were recorded in profile mode.}
 
 \item{guess_max}{guess_max used for reading the csv files. It's the number of rows to read to guess column data types.}
 }

@@ -144,12 +144,13 @@ correctImpurities.RTS <- function(msms, impurities, noise,
 #'
 #' @param impurities data frame of impurities for a specific lot
 #' @param txt.path path to the MaxQuant txt output folder. If using noiseband imputation, it should contain an intensity.txt and noise.txt file.
-#' @param levels list of which levels to perform purity correction and noiseband imputation. Options are "msms", "evidence", and "proteinGroups"
+#' @param levels list of which maxquant files to perform purity correction and noiseband imputation. Options are "msms", "evidence", "proteinGroups", or any "Sites" file. e.g "Phospho (STY)Sites"
 #' @param method purity correction method. Options = "NNLS" and "OLS"
 #' @param noise.replacement.method should the noiseband replace missing values before or after correction. Options = "pre", "post", "none"
 #' @param remain.missing should missing values be set to 0 (missing) after correction or not. Only used if not doing noiseband imputation. True or False
 #' @param remove.missing.rows should rows containing all missing rows be removed or not. True or False
 #' @param use.razor should razor peptides be used for protein quantification. Only used for proteinGroups and if msms is supplied.
+#' @param use.maxquant.msms.intensity should the intensity in the MSMS.txt file be used (or intensity.txt extracted from the raw file). Only use if MS2 data. Necessary if MS2s were recorded in profile mode.
 #' @param guess_max guess_max used for reading the csv files. It's the number of rows to read to guess column data types.
 #'
 #' @export
@@ -168,15 +169,29 @@ correctImpurities.MaxQuant <- function(impurities, txt.path,
                                        remain.missing=T,
                                        remove.missing.rows=T,
                                        use.razor=T,
-                                       guess_max=20000)
+                                       use.maxquant.msms.intensity=F,
+                                       guess_max=10000)
 {
   # match up arguments to valid options
-  levels <- match.arg(levels, several.ok = T)
   method <- match.arg(method)
   noise.replacement.method <- match.arg(noise.replacement.method)
   msms <- NA
   intensity <- NA
   noise <- NA
+
+  summary.path <- str_c(txt.path, "/summary.txt")
+  msms.path <- str_c(txt.path, "/msms.txt")
+  evidence.path <- str_c(txt.path, "/evidence.txt")
+  proteinGroups.path <- str_c(txt.path, "/proteinGroups.txt")
+  intensity.path <- str_c(txt.path, "/intensity.txt")
+  noise.path <- str_c(txt.path, "/noise.txt")
+
+
+  col.types <- cols("Diagnostic peak Phospho (STY) Y" = col_character(),
+                    "Potential contaminant" = col_character(),
+                    "Reverse" = col_character(),
+                    .default = col_guess())
+  na.types <- c("","NaN", "NA")
 
   # we can only correct the msms file if the noise.txt and intensity.txt files
   # are present because MaxQuant's TMT quant is missing/incorrect in the msms file
@@ -185,25 +200,48 @@ correctImpurities.MaxQuant <- function(impurities, txt.path,
     stop("Can't perform correction on msms without noise replacement. Either use noise replacement, or remove msms from the levels to correct")
   }
 
+
   # read in necessary files
   if ("msms" %in% levels || noise.replacement.method != "none")
   {
-    msms <- read_tsv(str_c(txt.path, "/msms.txt"), guess_max=guess_max)
+    msms <- read_tsv(msms.path,
+                     guess_max=guess_max,
+                     show_col_types=F,
+                     col_types=.get.cols(msms.path),
+                     na=na.types)
   }
   if ("evidence" %in% levels)
   {
-    evidence <- read_tsv(str_c(txt.path, "/evidence.txt"), guess_max=guess_max)
+    evidence <- read_tsv(evidence.path,
+                         guess_max=guess_max,
+                         show_col_types=F,
+                         col_types=.get.cols(evidence.path),
+                         na=na.types)
   }
   if ("proteinGroups" %in% levels)
   {
-    proteinGroups <- read_tsv(str_c(txt.path, "/proteinGroups.txt"), guess_max=guess_max)
-    summary <- read_tsv(str_c(txt.path, "/summary.txt"))
+    proteinGroups <- read_tsv(proteinGroups.path,
+                              guess_max=guess_max,
+                              show_col_types=F,
+                              col_types=.get.cols(proteinGroups.path),
+                              na=na.types)
+  }
+  if ("proteinGroups" %in% levels || any(str_detect(levels, "Sites")))
+  {
+    summary <- read_tsv(summary.path, show_col_types=F, na=na.types)
   }
   if (noise.replacement.method != "none")
   {
-    noise <- read_tsv(str_c(txt.path, "/noise.txt"))
-    intensity <- read_tsv(str_c(txt.path, "/intensity.txt"))
+    noise <- read_tsv(noise.path, show_col_types=F, na=na.types)
+    if (use.maxquant.msms.intensity)
+    {
+      intensity <- msms %>% select(`Raw file`, `Scan number`, matches("Reporter intensity \\d+"))
+    } else
+    {
+      intensity <- read_tsv(intensity.path, show_col_types=F, na=na.types)
+    }
   }
+
 
   output <- list()
 
@@ -241,6 +279,32 @@ correctImpurities.MaxQuant <- function(impurities, txt.path,
                                                             noise.replacement.method=noise.replacement.method,
                                                             remain.missing=remain.missing,
                                                             remove.missing.rows=remove.missing.rows)
+  }
+  for (level in levels)
+  {
+    if (str_detect(level, "Sites"))
+    {
+      sites.path <- str_c(txt.path, "/", level, ".txt")
+      sites <- read_tsv(sites.path,
+                        guess_max=guess_max,
+                        show_col_types=F,
+                        col_types=.get.cols(evidence.path),
+                        na=na.types)
+      mod <- str_remove(level, "Sites")
+
+
+      output[[level]] <- correctImpurities.sites(summary,
+                                                 sites,
+                                                 mod=mod,
+                                                 impurities,
+                                                 msms=msms,
+                                                 intensities=intensity,
+                                                 noise=noise,
+                                                 method=method,
+                                                 noise.replacement.method=noise.replacement.method,
+                                                 remain.missing=remain.missing,
+                                                 remove.missing.rows=remove.missing.rows)
+    }
   }
 
   # return list
@@ -300,7 +364,7 @@ correctImpurities.msms <- function(msms, impurities, intensities, noise,
   # exclude scans with no reporter ions since we don't want to impute them all
   if (remove.missing.rows)
   {
-    aligned <- aligned %>% filter(rowSums(across(matches("Reporter intensity \\d+"))) > 0)
+    aligned <- aligned %>% filter(any(across(matches("Reporter intensity \\d+")) > 0))
     msms <- msms %>% filter(id %in% aligned$id)
   }
 
@@ -320,8 +384,8 @@ correctImpurities.msms <- function(msms, impurities, intensities, noise,
 
   # correct impurities
   corrected.intensities <- correctImpurities(intensities, impurities, noise, method=method,
-                                noise.replacement.method=noise.replacement.method,
-                                remain.missing=remain.missing)
+                                             noise.replacement.method=noise.replacement.method,
+                                             remain.missing=remain.missing)
 
   # overwrite corrected columns
   corrected.msms <- msms %>%
@@ -405,12 +469,163 @@ correctImpurities.evidence <- function(evidence, impurities, msms, intensities, 
   # exclude scans with no reporter ions since we don't want to impute them all
   if (remove.missing.rows)
   {
-    corrected.evidence <- corrected.evidence %>% filter(rowSums(across(matches("Reporter intensity \\d+"))) > 0)
+    corrected.evidence <- corrected.evidence %>% filter(any(across(matches("Reporter intensity \\d+")) > 0))
   }
 
   return(corrected.evidence)
 }
 
+
+
+
+
+
+
+#' Performs purity correction on MaxQuant XXX_sites.txt data
+#'
+#' @param summary data frame of summary.txt
+#' @param evidence data frame of evidence.txt
+#' @param mod name of the modification, e.g. "Phospho (STY)"
+#' @param msms optional data frame of msms.txt to perform correction at spectrum level. Required for noiseband imputation.
+#' @param impurities data frame of impurities for a specific lot
+#' @param intensities data frame of TMT intensity values, raw file, and MS2 scan number
+#' @param noise optional data frame of TMT noiseband values, raw file, and MS2 scan number
+#' @param method purity correction method. Options = "NNLS" and "OLS"
+#' @param noise.replacement.method should the noiseband replace missing values before or after correction. Options = "pre", "post", "none"
+#' @param remain.missing should missing values be set to 0 (missing) after correction or not. Only used if not doing noiseband imputation. True or False
+#' @param remove.missing.rows should rows containing all missing rows be removed or not. True or False
+#'
+#' @export
+#' @examples
+#' \dontrun{
+#'
+#' }
+#'
+#'
+correctImpurities.sites <- function(summary, sites, mod, impurities, msms, intensities, noise,
+                                    method=c("NNLS","OLS"),
+                                    noise.replacement.method=c("pre","post","none"),
+                                    remain.missing=T,
+                                    remove.missing.rows=T)
+{
+  method <- match.arg(method)
+  noise.replacement.method <- match.arg(noise.replacement.method)
+  mod.col <- str_c(mod, " site IDs")
+
+  # get raw file to experiment mapping
+  summary <- summary %>%
+    filter(`Raw file` != "Total") %>%
+    select(`Raw file`, Experiment)
+  experiments <- unique(summary$Experiment)
+
+  # drop columns we're going to replace
+  corrected.sites <- sites %>%
+    select(-matches("Reporter intensity corrected \\d+"))
+
+  # get the suffixes for the number of sites (e.g "1" from __1)
+  quant.col.names <- colnames(sites)[str_detect(colnames(sites), "___")]
+  sites_per_pep <- unique(str_split_fixed(quant.col.names, "___", n=2)[,2])
+
+  # correct sites without noise
+  if (missing(msms) || is.na(msms))
+  {
+    for (exp in experiments)
+    {
+      for (site_suffix in sites_per_pep)
+      {
+        if (exp == "")
+        {
+          intensities <- sites %>% select(matches(str_c("Reporter intensity \\d+___", site_suffix)))
+        }
+        else
+        {
+          intensities <- sites %>% select(matches(str_c("Reporter intensity \\d+ ", exp, "___", site_suffix)))
+        }
+
+        corrected.intensities <- correctImpurities(intensities, impurities,
+                                                   method=method,
+                                                   noise.replacement.method=noise.replacement.method,
+                                                   remain.missing=remain.missing)
+
+        if (exp != "")
+        {
+          corrected.intensities <- corrected.intensities %>% as.data.frame() %>%
+            rename_with(.cols = matches("Reporter intensity corrected \\d+"), .fn = ~ str_c(.x, " ", exp, "___", site_suffix))
+        }
+
+        corrected.sites <- corrected.sites %>% cbind(corrected.intensities)
+      }
+    }
+  }
+
+  # correct evidence using msms and possibly noise
+  else
+  {
+    # correct MSMS
+    corrected.msms <- correctImpurities.msms(msms, impurities,
+                                             intensities=intensities,
+                                             noise=noise,
+                                             method=method,
+                                             noise.replacement.method=noise.replacement.method,
+                                             remain.missing=remaing.missing)
+
+
+
+    for (exp in experiments)
+    {
+      for (site_suffix in sites_per_pep)
+      {
+        if (exp == "")
+        {
+          corrected.msms.exp.site <- corrected.msms %>%
+            filter(!!as.name(mod) == as.numeric(site_suffix))
+        }
+        else
+        {
+          corrected.msms.exp.site <- corrected.msms %>%
+            filter(!!as.name(mod) == as.numeric(site_suffix)) %>%
+            inner_join(summary, by="Raw file") %>%
+            filter(Experiment == exp)
+        }
+
+        # summarize to site level
+        summarized.msms.exp.site <- corrected.msms.exp.site %>%
+          separate_rows(!!as.name(mod.col), sep=";", convert=T) %>%
+          group_by(!!as.name(mod.col)) %>%
+          summarise(across(matches("Reporter intensity corrected \\d+"), ~sum(., na.rm=T)),
+                    across(matches("Is missing \\d+"), ~all(as.logical(.), na.rm=T)),
+                    across(matches("SN \\d+"), ~sum(., na.rm=T)))
+
+        # update columns if multiple experiments
+        if (exp != "" & length(experiments) > 1)
+        {
+          summarized.msms.exp.site <- summarized.msms.exp.site %>%
+            rename_with(.cols = matches("Reporter intensity corrected \\d+"), .fn = ~ str_c(.x, " ", exp, "___", site_suffix)) %>%
+            rename_with(.cols = matches("Is missing \\d+"), .fn = ~ str_c(.x, " ", exp, "___", site_suffix)) %>%
+            rename_with(.cols = matches("SN \\d+"), .fn = ~ str_c(.x, " ", exp, "___", site_suffix))
+        }
+
+        # overwrite corrected intensity values.
+        corrected.sites <- corrected.sites %>%
+          left_join(summarized.msms.exp.site, by=c("id" = mod.col))
+      }
+    }
+  }
+
+  # replace NAs
+  corrected.sites <- corrected.sites %>%
+    mutate(across(matches("Reporter intensity corrected \\d+"), ~replace_na(.x, 0))) %>%
+    mutate(across(matches("Is missing \\d+"), ~replace_na(.x, T))) %>%
+    mutate(across(matches("SN \\d+"), ~replace_na(.x, 0)))
+
+  # exclude scans with no reporter ions since we don't want to impute them all
+  if (remove.missing.rows)
+  {
+    corrected.sites <- corrected.sites %>% filter(any(across(matches("Reporter intensity \\d+")) > 0))
+  }
+
+  return(corrected.sites)
+}
 
 
 
@@ -505,7 +720,6 @@ correctImpurities.proteinGroups <- function(summary, proteinGroups, impurities, 
       separate_rows(everything(), sep=";", convert=T) %>%
       filter(`Peptide is razor` == "True") %>%
       select(`Peptide IDs`, `id`)
-
     if (!use.razor)
     {
       corrected.msms <- corrected.msms %>% filter(!str_detect(`Protein group IDs`, ";"))
@@ -521,7 +735,7 @@ correctImpurities.proteinGroups <- function(summary, proteinGroups, impurities, 
       else
       {
         corrected.msms.exp <- corrected.msms %>%
-          inner_join(summary) %>%
+          inner_join(summary, by="Raw file") %>%
           filter(Experiment == exp)
       }
 
@@ -529,8 +743,7 @@ correctImpurities.proteinGroups <- function(summary, proteinGroups, impurities, 
 
       # summarize to proteinGroup level
       summarized.msms.exp <- corrected.msms.exp %>%
-        separate_rows(`Protein group IDs`, sep=";") %>%
-        mutate(`Protein group IDs` = as.numeric(`Protein group IDs`)) %>%
+        separate_rows(`Protein group IDs`, sep=";", convert=T) %>%
         inner_join(razor.peptide.ids, by=c("Peptide ID" = "Peptide IDs", "Protein group IDs" = "id")) %>%
         group_by(`Protein group IDs`) %>%
         summarise(across(matches("Reporter intensity corrected \\d+"), ~sum(., na.rm=T)),
@@ -552,10 +765,16 @@ correctImpurities.proteinGroups <- function(summary, proteinGroups, impurities, 
     }
   }
 
+  # replace NAs
+  corrected.proteinGroups <- corrected.proteinGroups %>%
+    mutate(across(matches("Reporter intensity corrected \\d+"), ~replace_na(.x, 0))) %>%
+    mutate(across(matches("Is missing \\d+"), ~replace_na(.x, T))) %>%
+    mutate(across(matches("SN \\d+"), ~replace_na(.x, 0)))
+
   # exclude scans with no reporter ions since we don't want to impute them all
   if (remove.missing.rows)
   {
-    corrected.proteinGroups <- corrected.proteinGroups %>% filter(rowSums(across(matches("Reporter intensity \\d+"))) > 0)
+    corrected.proteinGroups <- corrected.proteinGroups %>% filter(any(across(matches("Reporter intensity \\d+")) > 0))
   }
 
   return(corrected.proteinGroups)
@@ -713,6 +932,58 @@ correctImpurities <- function(data, impurities, noise,
   colnames(corrected.intensities) <- str_c("Reporter intensity corrected ", 1:nlabels)
 
   return(corrected.intensities)
+}
+
+###
+.get.cols <- function(path)
+{
+  col_types <- cols()
+  known_bool_cols <- str_c("Reverse", "Potential Contaminant", "Only identified by site", "Diagnostic peak", sep="|")
+
+  header <- read_tsv(path, n_max=0, show_col_types=F)
+
+  for (col in colnames(header))
+  {
+    if (str_detect(col, known_bool_cols))
+    {
+      col_types$cols[[col]] <- col_character()
+    }
+  }
+
+  return(col_types)
+}
+
+.get.cols.msms <- function(path)
+{
+  col_types <- cols_only()
+  known_bool_cols <- str_c("Reverse", "Potential Contaminant", "Only identified by site", "Diagnostic peak", sep="|")
+  known_integer_cols <- str_c("Scan number","^id$", "ID$", sep="|")
+  known_double_cols <- str_c("Reporter intensity \\d+", sep="|")
+  known_char_cols <- str_c("Raw file", "IDs$", sep="|")
+
+  header <- read_tsv(path, n_max=0, show_col_types=F)
+
+  for (col in colnames(header))
+  {
+    if (str_detect(col, known_bool_cols))
+    {
+      col_types$cols[[col]] <- col_character()
+    }
+    if (str_detect(col, known_integer_cols))
+    {
+      col_types$cols[[col]] <- col_integer()
+    }
+    if (str_detect(col, known_double_cols))
+    {
+      col_types$cols[[col]] <- col_double()
+    }
+    if (str_detect(col, known_char_cols))
+    {
+      col_types$cols[[col]] <- col_character()
+    }
+  }
+
+  return(col_types)
 }
 
 
