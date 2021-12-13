@@ -664,10 +664,23 @@ correctImpurities.proteinGroups <- function(summary, proteinGroups, impurities, 
   noise.replacement.method <- match.arg(noise.replacement.method)
 
   # get raw file to experiment mapping
-  summary <- summary %>%
-    filter(`Raw file` != "Total") %>%
-    select(`Raw file`, Experiment)
-  experiments <- unique(summary$Experiment)
+  if('Experiment' %in% colnames(summary)){
+    summary <- summary %>%
+      filter(`Raw file` != "Total") %>%
+      select(`Raw file`, Experiment)
+    experiments <- unique(summary$Experiment)
+  }
+
+  else{
+    message("No experiment names found.")
+    summary <- summary %>%
+      mutate(Experiment = "single_run") %>%
+      filter(`Raw file` != "Total") %>%
+      select(`Raw file`, Experiment)
+    experiments <- unique(summary$Experiment)
+  }
+
+
 
   corrected.proteinGroups <- proteinGroups %>%
     select(-matches("Reporter intensity corrected \\d+"))
