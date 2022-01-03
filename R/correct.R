@@ -349,8 +349,16 @@ correctImpurities.msms <- function(msms, impurities, intensities, noise,
   method <- match.arg(method)
   noise.replacement.method <- match.arg(noise.replacement.method)
 
+  ## solution to issue where one raw file/scan number combo isn't distinct and alternative sequence isn't quantified
+  ints <- colnames(intensities)[grep("Reporter intensity [0-9]+", colnames(intensities))]
+  intensities <- intensities %>%
+    group_by(`Raw file`, `Scan number`) %>%
+    mutate(duped = n()) %>%
+    ungroup() %>%
+    mutate(x = rowSums(is.na(intensities %>% select(all_of(ints))))) %>%
+    filter(x < length(ints) & duped == 1) %>%
+    select(-x, -duped)
 
-  # join data by raw file and scan number
   aligned <- msms %>%
     select(-matches("Reporter intensity \\d+")) %>%
     left_join(intensities, by=c("Raw file", "Scan number"))
